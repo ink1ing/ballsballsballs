@@ -1,0 +1,834 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>旋转六边形中的三小球物理演示</title>
+    <style>
+      :root {
+        --bg: #0d1117;       /* GitHub Dark */
+        --fg: #c9d1d9;
+        --border: #30363d;
+        --hint: #8b949e;
+        --accent: #6cf;
+      }
+      [data-theme="light"] {
+        --bg: #ffffff;       /* Pure White */
+        --fg: #24292f;
+        --border: #d0d7de;
+        --hint: #57606a;
+        --accent: #0969da;
+      }
+      html, body {
+        margin: 0;
+        height: 100%;
+        background: var(--bg);
+        color: var(--fg);
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen,
+          Ubuntu, Cantarell, 'Helvetica Neue', 'PingFang SC', 'Hiragino Sans GB', Arial, sans-serif;
+      }
+      #app {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+      }
+      header {
+        padding: 10px 14px;
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        border-bottom: 1px solid var(--border);
+        background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0));
+        backdrop-filter: blur(6px);
+      }
+      header .dot {
+        width: 10px; height: 10px; border-radius: 50%;
+        background: var(--accent);
+        box-shadow: 0 0 10px var(--accent);
+      }
+      header .meta {
+        opacity: 0.8; font-size: 12px;
+      }
+      canvas { width: 100%; height: 100%; display: block; }
+      /* 移除顶部“拖动窗口变化大小”的提示 */
+      .spacer { flex: 1; }
+      .toggle {
+        display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+      }
+      .toggle button {
+        background: transparent; color: var(--fg); border: 0; padding: 6px 10px; font-size: 12px; cursor: pointer;
+      }
+      .toggle button.active {
+        background: rgba(127, 127, 127, 0.15);
+      }
+      .toggle button:not(:last-child) {
+        border-right: 1px solid var(--border);
+      }
+      .ctrl {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .ctrl label { font-size: 12px; color: var(--hint); }
+      .ctrl output { font-size: 12px; min-width: 52px; text-align: right; color: var(--fg); }
+      .ctrl input[type="range"] { width: 180px; }
+      .ctrl button { font-size: 12px; padding: 3px 8px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--fg); cursor: pointer; }
+      /* 固定底部控制栏，避免窗口拖拽时消失 */
+      .footer {
+        position: fixed;
+        left: 0; right: 0; bottom: 0;
+        z-index: 10;
+        display:flex; align-items:center; justify-content:space-between;
+        gap:12px;
+        padding:8px 14px calc(8px + env(safe-area-inset-bottom));
+        border-top:1px solid var(--border);
+        background: linear-gradient(0deg, rgba(255,255,255,0.04), rgba(255,255,255,0));
+        backdrop-filter: blur(6px);
+        flex-wrap: wrap;
+      }
+      /* 允许中间画布在小视口下正确收缩，防止把底部推走 */
+      canvas { min-height: 0; }
+      .footer .left { display:flex; flex-direction: column; gap: 8px; align-items: stretch; flex: 1 1 300px; min-width: 0; }
+      .footer .left .row { display:flex; align-items: center; justify-content: space-between; gap: 10px; }
+      .footer .left .row .content { display:inline-flex; align-items:center; gap: 8px; flex: 1; }
+      .footer .left .row .content input[type="range"] { width: 320px; }
+      .footer .right { display:flex; gap: 16px; align-items: center; justify-content: flex-end; flex: 1 1 300px; flex-wrap: wrap; }
+      /* 原横向滑块样式 */
+      .ctrl input[type="range"] { width: 220px; }
+      .push-toggle { display:inline-flex; gap:8px; align-items:center; }
+      .switch { position: relative; width:44px; height:24px; border-radius:24px; background:#6b7280; cursor:pointer; transition:background .2s; }
+      .switch.on { background:#22c55e; }
+      .switch .knob { position:absolute; top:2px; left:2px; width:20px; height:20px; border-radius:50%; background:white; transition:left .2s; }
+      .switch.on .knob { left:22px; }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <header>
+        <div class="dot"></div>
+        <div>旋转六边形 | 三小球物理</div>
+        <div class="meta">重力、弹力、惯性、自旋可视化</div>
+        <div class="spacer"></div>
+        <div class="toggle" id="themeToggle">
+          <button data-theme="light">纯白</button>
+          <button data-theme="dark" class="active">GitHub暗色</button>
+        </div>
+        
+      </header>
+      <canvas id="canvas"></canvas>
+      <div class="footer">
+        <div class="left">
+          <div class="row">
+            <div class="content ctrl" id="ctrl-gravity">
+              <label>重力</label>
+              <input id="gravity" type="range" min="0" max="2000" step="10" />
+              <output id="gravityVal"></output>
+            </div>
+            <button id="gravityReset">恢复默认</button>
+          </div>
+          <div class="row">
+            <div class="content ctrl" id="ctrl-elastic">
+              <label>弹力</label>
+              <input id="elastic" type="range" min="0.5" max="1.0" step="0.01" />
+              <output id="elasticVal"></output>
+            </div>
+            <button id="elasticReset">恢复默认</button>
+          </div>
+          <div class="row">
+            <div class="content ctrl" id="ctrl-mouse">
+              <label>拖拽强度</label>
+              <input id="mouseK" type="range" min="1000" max="20000" step="100" />
+              <output id="mouseKVal"></output>
+            </div>
+            <button id="mouseKReset">恢复默认</button>
+          </div>
+        </div>
+        <div class="right">
+          <div class="ctrl" id="ctrl-presets">
+            <label>预设</label>
+            <div class="toggle" id="presets">
+              <button data-preset="earth" class="active">地球</button>
+              <button data-preset="moon">月球</button>
+              <button data-preset="space">太空</button>
+            </div>
+          </div>
+          <div class="push-toggle">
+            <label style="font-size:12px;color:var(--hint)">推推推</label>
+            <div id="pushSwitch" class="switch" role="switch" aria-checked="false" tabindex="0"><div class="knob"></div></div>
+            <span id="pushStatus" style="font-size:12px;opacity:.8">关闭</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script>
+      // 基础工具：向量与助手
+      const TAU = Math.PI * 2;
+      const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+      const lerp = (a, b, t) => a + (b - a) * t;
+
+      function vec(x=0, y=0) { return { x, y }; }
+      function add(a, b) { return { x: a.x + b.x, y: a.y + b.y }; }
+      function sub(a, b) { return { x: a.x - b.x, y: a.y - b.y }; }
+      function mul(a, s) { return { x: a.x * s, y: a.y * s }; }
+      function dot(a, b) { return a.x * b.x + a.y * b.y; }
+      function len(a) { return Math.hypot(a.x, a.y); }
+      function norm(a) { const L = len(a) || 1; return { x: a.x / L, y: a.y / L }; }
+      function perp(a) { return { x: -a.y, y: a.x }; }
+      function cross2(a, b) { return a.x * b.y - a.y * b.x; } // 2D cross -> scalar
+      function crossSV(s, v) { return { x: -s * v.y, y: s * v.x }; } // s(omega) x v
+      function rot(v, ang) { const c = Math.cos(ang), s = Math.sin(ang); return { x: v.x * c - v.y * s, y: v.x * s + v.y * c }; }
+
+      // 线段最近点
+      function closestPointOnSegment(p, a, b) {
+        const ab = sub(b, a);
+        const t = clamp(dot(sub(p, a), ab) / (dot(ab, ab) || 1), 0, 1);
+        return add(a, mul(ab, t));
+      }
+
+      // 正六边形顶点（未旋转）
+      function hexagonPoints(center, R, angle) {
+        const pts = [];
+        for (let i = 0; i < 6; i++) {
+          const a = angle + i * TAU / 6;
+          pts.push({ x: center.x + R * Math.cos(a), y: center.y + R * Math.sin(a) });
+        }
+        return pts;
+      }
+
+      const canvas = document.getElementById('canvas');
+      const ctx = canvas.getContext('2d');
+
+      const state = {
+        dpr: Math.max(1, window.devicePixelRatio || 1),
+        w: 0,
+        h: 0,
+        center: vec(),
+        hexR: 200,
+        hexAngle: 0,
+        hexOmega: 0.56, // 六边形角速度略增，稍微更有动感
+        gravity: 600,  // 像素单位重力加速度（px/s^2），适度降低
+        balls: [],
+        theme: 'dark',
+        mouse: { x: 0, y: 0, vx: 0, vy: 0, down: false, t: performance.now() / 1000 },
+        grab: null, // { ball, rLocal }
+        mouseSpringK: 7000,
+        mouseDamping: 7000 * 0.085,
+        pushEnabled: false,
+        // 长按推推推状态
+        pushHoldActive: false,
+        pushHoldDir: 0, // +1 顺时针，-1 逆时针（与原注释一致）
+        pushHoldStart: 0,
+        // 窗口拖拽/调整大小时暂停物理
+        isResizing: false,
+        hexOmegaMax: 2.0,
+        pushImpulse: 0.12,
+      };
+
+      function resize() {
+        const { clientWidth, clientHeight } = canvas;
+        state.dpr = Math.max(1, window.devicePixelRatio || 1);
+        // 记录旧中心，用于保持相对位置
+        const oldCenter = { x: state.center.x, y: state.center.y };
+        canvas.width = Math.floor(clientWidth * state.dpr);
+        canvas.height = Math.floor(clientHeight * state.dpr);
+        state.w = canvas.width / state.dpr;
+        state.h = canvas.height / state.dpr;
+        ctx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0);
+        state.center = vec(state.w / 2, state.h / 2);
+        // 六边形大小保持不变：不再根据视口调整 hexR
+        // 小球相对六边形位置保持不变：随中心平移相同的位移
+        if (Number.isFinite(oldCenter.x) && Number.isFinite(oldCenter.y)) {
+          const dx = state.center.x - oldCenter.x;
+          const dy = state.center.y - oldCenter.y;
+          if (dx || dy) {
+            for (const b of state.balls) {
+              b.p.x += dx;
+              b.p.y += dy;
+            }
+          }
+        }
+      }
+      // 拖拽窗口大小时，暂停动画步进，防止小球卡出边界
+      let _resizeTimer = null;
+      window.addEventListener('resize', () => {
+        state.isResizing = true;
+        resize();
+        if (_resizeTimer) clearTimeout(_resizeTimer);
+        _resizeTimer = setTimeout(() => { state.isResizing = false; }, 180);
+      });
+      resize();
+
+      // 贴图（来自 @lobehub/icons 的静态 PNG）按主题切换 dark/light
+      const ICONS = {
+        claude: {
+          dark: 'https://cdn.jsdelivr.net/gh/lobehub/lobe-icons@master/packages/static-png/dark/claude-color.png',
+          light: 'https://cdn.jsdelivr.net/gh/lobehub/lobe-icons@master/packages/static-png/light/claude-color.png',
+        },
+        openai: {
+          dark: 'https://cdn.jsdelivr.net/gh/lobehub/lobe-icons@master/packages/static-png/dark/openai.png',
+          light: 'https://cdn.jsdelivr.net/gh/lobehub/lobe-icons@master/packages/static-png/light/openai.png',
+        },
+        gemini: {
+          dark: 'https://cdn.jsdelivr.net/gh/lobehub/lobe-icons@master/packages/static-png/dark/gemini-color.png',
+          light: 'https://cdn.jsdelivr.net/gh/lobehub/lobe-icons@master/packages/static-png/light/gemini-color.png',
+        },
+        grok: {
+          dark: 'https://cdn.jsdelivr.net/gh/lobehub/lobe-icons@master/packages/static-png/dark/grok.png',
+          light: 'https://cdn.jsdelivr.net/gh/lobehub/lobe-icons@master/packages/static-png/light/grok.png',
+        },
+        perplexity: {
+          dark: 'https://cdn.jsdelivr.net/gh/lobehub/lobe-icons@master/packages/static-png/dark/perplexity-color.png',
+          light: 'https://cdn.jsdelivr.net/gh/lobehub/lobe-icons@master/packages/static-png/light/perplexity-color.png',
+        },
+      };
+      function iconUrl(key, theme) {
+        const set = ICONS[key];
+        if (!set) return '';
+        return (theme === 'light' ? set.light : set.dark) || set.dark || set.light;
+      }
+      // 各 logo 对应的官网链接
+      const SITE_URL = {
+        claude: 'https://claude.ai',
+        openai: 'https://chat.com',
+        gemini: 'https://gemini.google.com',
+        grok: 'https://grok.com',
+        perplexity: 'https://perplexity.ai',
+      };
+      function urlForBall(b) { return SITE_URL[b.iconKey] || null; }
+
+      // 球体类
+      class Ball {
+        constructor({ x, y, r=24, iconKey='openai', colorA='#6cf', colorB='#6f9' }) {
+          this.p = vec(x, y);
+          this.v = vec(0, 0);
+          this.r = r;
+          this.m = r * r * 0.02 + 1; // 简化质量（随半径平方）
+          this.I = 0.5 * this.m * this.r * this.r; // 实心圆惯量
+          this.omega = 0; // 角速度
+          this.theta = Math.random() * TAU; // 朝向
+          this.colorA = colorA;
+          this.colorB = colorB;
+          this.iconKey = iconKey;
+          this.img = null; // 贴图
+        }
+      }
+
+      // 初始化小球（5个，含 Grok / Perplexity）
+      function initBalls() {
+        const R = state.hexR * 0.55;
+        state.balls = [
+          new Ball({ iconKey:'claude', x: state.center.x - R * 0.5, y: state.center.y - R * 0.1, r: 26, colorA:'#7cf', colorB:'#acf' }),
+          new Ball({ iconKey:'openai', x: state.center.x + R * 0.3, y: state.center.y - R * 0.2, r: 28, colorA:'#fa7', colorB:'#fdc' }),
+          new Ball({ iconKey:'gemini', x: state.center.x + 0, y: state.center.y + R * 0.25, r: 24, colorA:'#9f7', colorB:'#cdf' }),
+          new Ball({ iconKey:'grok', x: state.center.x - R * 0.05, y: state.center.y - R * 0.55, r: 24, colorA:'#9cf', colorB:'#def' }),
+          new Ball({ iconKey:'perplexity', x: state.center.x + R * 0.55, y: state.center.y + R * 0.05, r: 24, colorA:'#f9a', colorB:'#fed' }),
+        ];
+        // 初速度
+        const initV = [vec(80, -20), vec(-60, 0), vec(40, -30), vec(-20, -20), vec(10, -40)];
+        for (let i = 0; i < state.balls.length; i++) state.balls[i].v = initV[i % initV.length];
+
+        updateBallTexturesForTheme();
+      }
+      function updateBallTexturesForTheme() {
+        for (const b of state.balls) {
+          const url = iconUrl(b.iconKey, state.theme);
+          if (!url) continue;
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.src = url;
+          b.img = img;
+        }
+      }
+      initBalls();
+
+      // 主题切换
+      function applyTheme(theme) {
+        state.theme = theme === 'light' ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-theme', state.theme);
+        // 更新贴图以适配浅/深背景
+        updateBallTexturesForTheme();
+        // 更新切换按钮选中态
+        const toggle = document.getElementById('themeToggle');
+        if (toggle) {
+          const btns = toggle.querySelectorAll('button');
+          btns.forEach((b) => b.classList.toggle('active', b.getAttribute('data-theme') === state.theme));
+        }
+      }
+
+      // 初始化主题为 GitHub 暗色
+      applyTheme('dark');
+
+      // 绑定点击事件
+      document.getElementById('themeToggle').addEventListener('click', (e) => {
+        const target = e.target.closest('button');
+        if (!target) return;
+        const t = target.getAttribute('data-theme');
+        applyTheme(t);
+      });
+
+      // 碰撞参数
+      const params = {
+        eWall: 0.99, // 壁面弹性提高，保证反弹更足
+        eBall: 0.98, // 球-球弹性提高
+        muWall: 0.28,// 略增壁面摩擦，增强带动效果
+        muBall: 0.10, // 减小球-球摩擦，减少能量损失
+        linDrag: 0.01,   // 线性空气阻尼显著降低
+        angDrag: 0.08,   // 角阻尼降低，保持自旋
+        positionSlop: 0.01,
+      };
+
+      function integrateForces(dt) {
+        const g = state.gravity;
+        const drag = Math.exp(-params.linDrag * dt);
+        const adrag = Math.exp(-params.angDrag * dt);
+        for (const b of state.balls) {
+          b.v.y += g * dt; // 重力
+          b.v.x *= drag;
+          b.v.y *= drag;
+          b.omega *= adrag;
+        }
+        // 鼠标拖拽弹簧力（优先受鼠标的力）
+        if (state.grab && state.grab.ball) {
+          const b = state.grab.ball;
+          const rWorld = rot(state.grab.rLocal, b.theta);
+          const anchor = add(b.p, rWorld);
+          const vAnchor = add(b.v, crossSV(b.omega, rWorld));
+          const mouse = state.mouse;
+          const k = state.mouseSpringK; // 弹簧系数
+          const c = state.mouseDamping; // 阻尼系数（按比例）
+          const maxF = 20000; // 最大力限制，避免数值爆炸
+          const dx = sub(vec(mouse.x, mouse.y), anchor);
+          const dv = sub(vec(mouse.vx, mouse.vy), vAnchor);
+          let Fx = k * dx.x + c * dv.x;
+          let Fy = k * dx.y + c * dv.y;
+          const mag = Math.hypot(Fx, Fy);
+          if (mag > maxF) { Fx *= maxF / mag; Fy *= maxF / mag; }
+          // 线性动量
+          b.v.x += (Fx / b.m) * dt;
+          b.v.y += (Fy / b.m) * dt;
+          // 角动量 τ = r × F
+          const torque = rWorld.x * Fy - rWorld.y * Fx;
+          b.omega += (torque / b.I) * dt;
+        }
+      }
+
+      function edgesOfHex(center, R, angle) {
+        const pts = hexagonPoints(center, R, angle);
+        const edges = [];
+        for (let i = 0; i < 6; i++) {
+          const a = pts[i];
+          const b = pts[(i + 1) % 6];
+          edges.push([a, b]);
+        }
+        return edges;
+      }
+
+      // 球与六边形壁面碰撞（考虑六边形旋转导致的壁面点速度）
+      function collideBallWithHex(b, edges) {
+        const c = state.center;
+        const w = state.hexOmega; // 角速度（rad/s）
+
+        for (const [a, d] of edges) {
+          const cp = closestPointOnSegment(b.p, a, d);
+          let n = sub(b.p, cp);
+          let dist = len(n);
+          if (dist < b.r) {
+            if (dist < 1e-6) {
+              // 与顶点几乎重合，使用从多边形中心指向球心的方向
+              n = norm(sub(b.p, c));
+              dist = 1e-6;
+            } else {
+              n = mul(n, 1 / dist);
+            }
+            const penetration = b.r - dist;
+
+            // 位置校正：把球推出壁面
+            b.p = add(b.p, mul(n, penetration + params.positionSlop));
+
+            // 计算接触点处壁面速度（刚体旋转 v = ω × r）
+            const rWorld = sub(cp, c);
+            const vWall = crossSV(w, rWorld);
+
+            // 球接触点速度（平动 + 自旋）
+            const rBall = mul(n, -b.r); // 从球心到接触点
+            const vBallContact = add(b.v, crossSV(b.omega, rBall));
+            const vRel = sub(vBallContact, vWall);
+
+            // 法向冲量（不影响自旋）
+            const vn = dot(vRel, n);
+            let jnApplied = 0;
+            if (vn < 0) {
+              const jn = -(1 + params.eWall) * vn / (1 / b.m);
+              b.v = add(b.v, mul(n, jn / b.m));
+              jnApplied = Math.abs(jn);
+            }
+
+            // 切向摩擦 -> 自旋
+            const t = perp(n);
+            const vt = dot(vRel, t);
+            // 有效质量（切向）
+            const rCrossT = cross2(rBall, t); // = -r
+            const denomT = (1 / b.m) + (rCrossT * rCrossT) / b.I;
+            let jt = -vt / denomT;
+
+            // 库仑摩擦限制
+            const maxF = jnApplied * params.muWall;
+            jt = clamp(jt, -maxF, maxF);
+
+            // 施加切向冲量
+            b.v = add(b.v, mul(t, jt / b.m));
+            const torque = cross2(rBall, mul(t, jt)); // 标量
+            b.omega += torque / b.I;
+          }
+        }
+      }
+
+      function collideBallsPair(b1, b2) {
+        const delta = sub(b2.p, b1.p);
+        const dist = len(delta);
+        const minDist = b1.r + b2.r;
+        if (dist === 0) return; // 重合，忽略
+        if (dist < minDist) {
+          const n = mul(delta, 1 / dist);
+          const penetration = minDist - dist;
+          // 位置校正（按质量反比分配）
+          const totalInvM = 1 / b1.m + 1 / b2.m;
+          const corr1 = (1 / b1.m) / totalInvM * penetration;
+          const corr2 = (1 / b2.m) / totalInvM * penetration;
+          b1.p = add(b1.p, mul(n, -corr1));
+          b2.p = add(b2.p, mul(n, +corr2));
+
+          // 接触点与相对速度（含自旋）
+          const r1 = mul(n, +b1.r);
+          const r2 = mul(n, -b2.r);
+          const v1c = add(b1.v, crossSV(b1.omega, r1));
+          const v2c = add(b2.v, crossSV(b2.omega, r2));
+          const vRel = sub(v2c, v1c);
+
+          // 法向冲量（不影响自旋）
+          const vn = dot(vRel, n);
+          if (vn < 0) {
+            const invMass = (1 / b1.m) + (1 / b2.m);
+            const jn = -(1 + params.eBall) * vn / invMass;
+            const impulseN = mul(n, jn);
+            b1.v = add(b1.v, mul(impulseN, -1 / b1.m));
+            b2.v = add(b2.v, mul(impulseN, +1 / b2.m));
+          }
+
+          // 切向摩擦 -> 自旋耦合
+          const t = perp(n);
+          // v_rel_t = dot(v2 - v1, t) + (-w2*r2 - w1*r1)
+          const vt = dot(sub(b2.v, b1.v), t) + (-b2.omega * b2.r - b1.omega * b1.r);
+          const denomT = (1 / b1.m) + (1 / b2.m) + (b1.r * b1.r) / b1.I + (b2.r * b2.r) / b2.I;
+          let jt = -vt / denomT;
+
+          // 摩擦限制（基于法向冲量规模）
+          const approxJn = Math.abs((1 + params.eBall) * vn / ((1 / b1.m) + (1 / b2.m)));
+          const maxJt = approxJn * params.muBall;
+          jt = clamp(jt, -maxJt, maxJt);
+
+          const impulseT = mul(t, jt);
+          b1.v = add(b1.v, mul(impulseT, -1 / b1.m));
+          b2.v = add(b2.v, mul(impulseT, +1 / b2.m));
+          // 自旋更新（τ = r × J）
+          b1.omega += cross2(r1, mul(impulseT, -1)) / b1.I;
+          b2.omega += cross2(r2, mul(impulseT, +1)) / b2.I;
+        }
+      }
+
+      function step(dt) {
+        // 限制dt避免穿透过深
+        dt = Math.min(dt, 1 / 60);
+        state.hexOmega = clamp(state.hexOmega, -state.hexOmegaMax, state.hexOmegaMax);
+        // 长按推推推：按住越久，加速度越大，持续加速至上限
+        if (state.pushEnabled && state.pushHoldActive) {
+          const tNow = performance.now() / 1000;
+          const holdT = Math.max(0, tNow - state.pushHoldStart);
+          const baseA = state.pushImpulse * 4;   // 基础角加速度（rad/s^2）
+          const growA = state.pushImpulse * 3;   // 随时间增长部分
+          const angA = baseA + growA * holdT;
+          state.hexOmega = clamp(
+            state.hexOmega + state.pushHoldDir * angA * dt,
+            -state.hexOmegaMax,
+            state.hexOmegaMax
+          );
+        }
+        state.hexAngle += state.hexOmega * dt;
+        integrateForces(dt);
+
+        // 更新位置
+        for (const b of state.balls) {
+          b.p = add(b.p, mul(b.v, dt));
+          b.theta += b.omega * dt;
+        }
+
+        // 与旋转六边形的碰撞
+        const edges = edgesOfHex(state.center, state.hexR, state.hexAngle);
+        for (const b of state.balls) {
+          collideBallWithHex(b, edges);
+        }
+
+        // 球-球碰撞（任意数量）
+        for (let i = 0; i < state.balls.length; i++) {
+          for (let j = i + 1; j < state.balls.length; j++) {
+            collideBallsPair(state.balls[i], state.balls[j]);
+          }
+        }
+      }
+
+      // 绘制：六边形与球
+      function drawHexagon(center, R, angle) {
+        const pts = hexagonPoints(center, R, angle);
+        // 填充
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, pts[0].y);
+        for (let i = 1; i < 6; i++) ctx.lineTo(pts[i].x, pts[i].y);
+        ctx.closePath();
+
+        const grad = ctx.createLinearGradient(center.x - R, center.y - R, center.x + R, center.y + R);
+        if (state.theme === 'light') {
+          grad.addColorStop(0, 'rgba(120,160,255,0.15)');
+          grad.addColorStop(1, 'rgba(180,120,255,0.10)');
+        } else {
+          grad.addColorStop(0, 'rgba(40,60,120,0.25)');
+          grad.addColorStop(1, 'rgba(120,40,180,0.15)');
+        }
+        ctx.fillStyle = grad;
+        ctx.fill();
+
+        // 边框
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = state.theme === 'light' ? 'rgba(31,35,40,0.35)' : 'rgba(180,200,255,0.6)';
+        ctx.stroke();
+
+        // 外发光
+        ctx.save();
+        ctx.shadowBlur = state.theme === 'light' ? 10 : 20;
+        ctx.shadowColor = state.theme === 'light' ? 'rgba(31,35,40,0.1)' : 'rgba(120,180,255,0.35)';
+        ctx.strokeStyle = state.theme === 'light' ? 'rgba(31,35,40,0.15)' : 'rgba(120,180,255,0.3)';
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      function drawBall(b) {
+        ctx.save();
+        ctx.translate(b.p.x, b.p.y);
+        // 仅绘制 icon，保持自转；不再绘制球体底色、高光、外轮廓
+        if (b.img && b.img.complete && b.img.naturalWidth > 0) {
+          ctx.save();
+          ctx.rotate(b.theta);
+          const side = b.r * 1.6; // 图标尺寸相对半径
+          ctx.drawImage(b.img, -side / 2, -side / 2, side, side);
+          ctx.restore();
+        }
+        ctx.restore();
+      }
+
+      function render() {
+        ctx.clearRect(0, 0, state.w, state.h);
+        // 背景网格微弱显示
+        ctx.save();
+        ctx.globalAlpha = 0.15;
+        const grid = 36;
+        ctx.strokeStyle = state.theme === 'light' ? '#e5e9f0' : '#1a223a';
+        ctx.lineWidth = 1;
+        for (let x = (state.center.x % grid); x < state.w; x += grid) {
+          ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, state.h); ctx.stroke();
+        }
+        for (let y = (state.center.y % grid); y < state.h; y += grid) {
+          ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(state.w, y); ctx.stroke();
+        }
+        ctx.restore();
+
+        // 六边形
+        drawHexagon(state.center, state.hexR, state.hexAngle);
+
+        // 小球
+        for (const b of state.balls) drawBall(b);
+      }
+
+      let last = performance.now();
+      function tick(now) {
+        const dt = (now - last) / 1000;
+        last = now;
+        if (!state.isResizing) {
+          step(dt);
+        } else {
+          // 在调整大小时不进行步进，避免穿透；仅重绘以适配尺寸
+          // 同时不累计dt
+        }
+        render();
+        requestAnimationFrame(tick);
+      }
+      requestAnimationFrame(tick);
+
+      // 控件绑定与默认值
+      const defaults = {
+        gravity: state.gravity,
+        elasticity: (function(){ return Math.min(1, (0.0 + 1*1 + 1*1), params ? (params.eWall + params.eBall)/2 : 0.99); })(),
+        mouseK: state.mouseSpringK,
+      };
+      // 如果上面计算方式夸张，直接回退为当前参数
+      defaults.elasticity = (typeof params !== 'undefined' && params) ? (params.eWall + params.eBall)/2 : 0.99;
+
+      function fmt(val, unit) { return unit ? (val.toFixed(0) + unit) : val.toFixed(2); }
+      function applyGravity(v) { state.gravity = v; gravityVal.textContent = fmt(v, ''); }
+      function applyElasticity(v) {
+        const e = Math.max(0.0, Math.min(1.0, v));
+        params.eWall = e; params.eBall = e;
+        elasticVal.textContent = e.toFixed(2);
+      }
+      function applyMouseStrength(v) {
+        state.mouseSpringK = v;
+        state.mouseDamping = v * 0.085;
+        mouseKVal.textContent = fmt(v, '');
+      }
+
+      const gravityInput = document.getElementById('gravity');
+      const gravityVal = document.getElementById('gravityVal');
+      gravityInput.value = String(state.gravity);
+      applyGravity(state.gravity);
+      gravityInput.addEventListener('input', (e) => applyGravity(Number(e.target.value)));
+      document.getElementById('gravityReset').addEventListener('click', () => { gravityInput.value = defaults.gravity; applyGravity(defaults.gravity); });
+
+      const elasticInput = document.getElementById('elastic');
+      const elasticVal = document.getElementById('elasticVal');
+      elasticInput.value = String(defaults.elasticity);
+      applyElasticity(Number(elasticInput.value));
+      elasticInput.addEventListener('input', (e) => applyElasticity(Number(e.target.value)));
+      document.getElementById('elasticReset').addEventListener('click', () => { elasticInput.value = defaults.elasticity; applyElasticity(defaults.elasticity); });
+
+      const mouseKInput = document.getElementById('mouseK');
+      const mouseKVal = document.getElementById('mouseKVal');
+      mouseKInput.value = String(state.mouseSpringK);
+      applyMouseStrength(state.mouseSpringK);
+      mouseKInput.addEventListener('input', (e) => applyMouseStrength(Number(e.target.value)));
+      document.getElementById('mouseKReset').addEventListener('click', () => { mouseKInput.value = defaults.mouseK; applyMouseStrength(defaults.mouseK); });
+
+      // 预设：地球、月球、太空（设置重力与统一弹力）
+      const PRESETS = {
+        earth: { gravity: 600, elasticity: 0.98 },
+        moon:  { gravity: 100, elasticity: 0.99 },
+        space: { gravity:   0, elasticity: 1.00 },
+      };
+      function applyPreset(name) {
+        const p = PRESETS[name];
+        if (!p) return;
+        // 更新滑块值并应用
+        gravityInput.value = String(p.gravity);
+        elasticInput.value = String(p.elasticity);
+        applyGravity(p.gravity);
+        applyElasticity(p.elasticity);
+        // 高亮当前预设
+        const group = document.getElementById('presets');
+        if (group) {
+          [...group.querySelectorAll('button')].forEach((btn)=>{
+            btn.classList.toggle('active', btn.getAttribute('data-preset') === name);
+          });
+        }
+      }
+      document.getElementById('presets').addEventListener('click', (e) => {
+        const btn = e.target.closest('button');
+        if (!btn) return;
+        const name = btn.getAttribute('data-preset');
+        applyPreset(name);
+      });
+
+      // 交互：鼠标/触控拖拽
+      function pickBallAt(pos) {
+        let best = null;
+        let bestDist = Infinity;
+        for (const b of state.balls) {
+          const d = Math.hypot(pos.x - b.p.x, pos.y - b.p.y);
+          if (d <= b.r * 1.1 && d < bestDist) { best = b; bestDist = d; }
+        }
+        return best;
+      }
+
+      function onPointerDown(e) {
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        state.mouse.down = true;
+        state.mouse.x = x; state.mouse.y = y; state.mouse.vx = 0; state.mouse.vy = 0; state.mouse.t = performance.now() / 1000;
+        // 记录点击判定基线
+        state._tap = { x0: x, y0: y, t0: performance.now(), ball: null };
+        const b = pickBallAt({ x, y });
+        // 优先拖拽小球；若未抓到球，且启用推推推，则进入长按模式
+        if (!b && state.pushEnabled) {
+          const half = state.w / 2;
+          const s = (x < half) ? +1 : -1; // 左半顺时针(+)，右半逆时针(-)
+          state.pushHoldActive = true;
+          state.pushHoldDir = s;
+          state.pushHoldStart = performance.now() / 1000;
+        }
+        if (b) {
+          // 记录点击目标
+          if (state._tap) state._tap.ball = b;
+          // 记录局部抓取点（随角度变化产生真实扭矩）
+          const rWorld = sub({ x, y }, b.p);
+          const rLocal = rot(rWorld, -b.theta);
+          state.grab = { ball: b, rLocal };
+          // 可选：给一点“抓取”反馈
+          // b.omega *= 0.9;
+          try { canvas.setPointerCapture(e.pointerId); } catch {}
+        }
+      }
+      function onPointerMove(e) {
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        const t = performance.now() / 1000;
+        const dt = Math.max(1e-3, t - state.mouse.t);
+        state.mouse.vx = (x - state.mouse.x) / dt;
+        state.mouse.vy = (y - state.mouse.y) / dt;
+        state.mouse.x = x; state.mouse.y = y; state.mouse.t = t;
+      }
+      function onPointerUp(e) {
+        state.mouse.down = false;
+        state.grab = null;
+        state.pushHoldActive = false;
+        // 轻点打开官网（不改变球体外观，不影响拖拽）
+        if (state._tap) {
+          const rect = canvas.getBoundingClientRect();
+          const x = e.clientX - rect.left;
+          const y = e.clientY - rect.top;
+          const dt = performance.now() - state._tap.t0;
+          const dx = x - state._tap.x0;
+          const dy = y - state._tap.y0;
+          const moved2 = dx*dx + dy*dy;
+          const tapTime = dt <= 220;       // 时间阈值（ms）
+          const tapMove = moved2 <= 25;    // 位移阈值（px^2），约 5px
+          const b = state._tap.ball;
+          if (b && tapTime && tapMove) {
+            const url = urlForBall(b);
+            if (url) {
+              try { window.open(url, '_blank', 'noopener,noreferrer'); } catch {}
+            }
+          }
+        }
+        state._tap = null;
+        try { canvas.releasePointerCapture(e.pointerId); } catch {}
+      }
+      canvas.addEventListener('pointerdown', onPointerDown, { passive: true });
+      canvas.addEventListener('pointermove', onPointerMove, { passive: true });
+      canvas.addEventListener('pointerup', onPointerUp, { passive: true });
+      canvas.addEventListener('pointercancel', onPointerUp, { passive: true });
+
+      // 推推推 开关
+      const pushSwitch = document.getElementById('pushSwitch');
+      const pushStatus = document.getElementById('pushStatus');
+      function updatePushUI() {
+        pushSwitch.classList.toggle('on', state.pushEnabled);
+        pushSwitch.setAttribute('aria-checked', String(state.pushEnabled));
+        pushStatus.textContent = state.pushEnabled ? '开启' : '关闭';
+      }
+      function togglePush() { state.pushEnabled = !state.pushEnabled; updatePushUI(); }
+      pushSwitch.addEventListener('click', togglePush);
+      pushSwitch.addEventListener('keydown', (e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); togglePush(); } });
+      updatePushUI();
+    </script>
+  </body>
+  </html>
