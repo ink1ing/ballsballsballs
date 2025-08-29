@@ -1,4 +1,4 @@
-# 旋转六边形 · 小球物理演示
+# 经典旋转六边形: 物理+AI+vibecoding (本项目100%由codex cli with gpt5 high完成)
 
 ## 项目简介
 - 演示站点，点我点我！！https://ink1ing.github.io/ballsballsballs/
